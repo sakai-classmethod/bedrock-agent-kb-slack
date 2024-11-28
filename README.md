@@ -13,7 +13,7 @@
 
 1. リポジトリをクローンします。
    ```bash
-   git clone https://github.com/sakai-classmethod/rag-chatbot-stack.git
+   git clone https://github.com/sakai-classmethod/bedrock-agent-kb-slack.git
    cd bedrock-agent-kb-slack
    ```
 2. `template.yaml`を使用して、AWSリソースをデプロイします。

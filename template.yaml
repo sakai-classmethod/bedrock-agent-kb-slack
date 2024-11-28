@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Bedrock Agent with Slack integration
+
+Parameters:
+  FoundationModelId:
+    Type: String
+    Default: anthropic.claude-3-5-sonnet-20240620-v1:0
+
+  SlackChannelId:
+    Description: The ID of the Slack channel.
+    Type: String
+    NoEcho: true
+
+  SlackWorkspaceId:
+    Description: The ID of the Slack workspace.
+    Type: String
+    NoEcho: true
+
+  KnowledgeBaseId:
+    Description: The ID of the Knowledge Base.
+    Type: String
+    NoEcho: true
+
+Resources:
+  SlackChannel:
+    Type: AWS::Chatbot::SlackChannelConfiguration
+    Properties:
+      ConfigurationName: !Sub ${AWS::StackName}-slack-channel
+      SlackChannelId: !Ref SlackChannelId
+      IamRoleArn: !GetAtt ChatbotRole.Arn
+      SlackWorkspaceId: !Ref SlackWorkspaceId
+      LoggingLevel: INFO
+
+  ChatbotRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-chatbot-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: chatbot.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref ChatbotPolicy
+
+  ChatbotPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${AWS::StackName}-chatbot-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeAgent
+            Resource: !GetAtt AgentAlias.AgentAliasArn
+
+  AgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub AmazonBedrockExecutionRoleForAgents_${AWS::StackName}
+      ManagedPolicyArns:
+        - !Ref AgentPolicy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*
+
+  AgentPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+            Resource:
+              - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/${FoundationModelId}
+          - Effect: Allow
+            Action:
+              - bedrock:Retrieve
+            Resource:
+              - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBaseId}
+
+  Agent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub ${AWS::StackName}-agent
+      AgentResourceRoleArn: !GetAtt AgentRole.Arn
+      FoundationModel: !Ref FoundationModelId
+      Instruction: |
+        あなたは専門的な情報を提供するAIアシスタントです。以下の指示に厳密に従って回答を生成してください：
+        1. 提供されたナレッジベースの情報を優先的に使用し、それらを完全に理解してください。
+        2. ナレッジベースの情報のみを使用して回答を作成してください。ナレッジベースに含まれていない情報は絶対に使用しないでください。
+        3. 回答の中で、参照した情報の出典や根拠を明確に示してください。可能な限り、具体的な情報源や文書名を言及してください。
+        4. ナレッジベースに関連情報がない場合は、「回答に必要な情報が見つかりませんでした。」とのみ回答してください。
+        5. 質問が具体的でない場合は、より具体的な質問の仕方をアドバイスしてください。
+        6. 回答は平文のテキストで提供し、見出しやタイトルは不要です。JSON形式での回答は避けてください。
+        7. 雑談や挨拶には応じず、「私は雑談はできません。通常のチャット機能をご利用ください。」とのみ回答してください。
+        8. 指示されたルール以外のことは絶対に行わないでください。例外は一切ありません。
+        これらの指示に従い、ユーザーの質問に対して正確かつ関連性の高い情報を提供してください。常に情報の出典を明らかにし、透明性のある回答を心がけてください。
+      KnowledgeBases:
+        - KnowledgeBaseId: !Ref KnowledgeBaseId
+          Description: Knowledge Base for the Agent.
+          KnowledgeBaseState: ENABLED
+      AutoPrepare: true
+
+  AgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentAliasName: !Sub ${AWS::StackName}-agent-alias-v1
+      AgentId: !Ref Agent
+
+Outputs:
+  AgentArn:
+    Value: !GetAtt Agent.AgentArn
+
+  AgentAlias:
+    Value: !GetAtt AgentAlias.AgentAliasId
